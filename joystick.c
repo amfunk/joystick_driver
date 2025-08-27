@@ -74,10 +74,28 @@ static struct platform_driver joy_driver = {
     },
 };
 
+#if 1
 /* Step 7: Module entry/exit */
 module_platform_driver(joy_driver);
 
-MODULE_AUTHOR("Your Name");
-MODULE_DESCRIPTION("Skeleton GPIO Joystick Driver");
+#else
+/* Testing to make sure we are loading correctly */
+static int __init joy_init(void)
+{
+  printk(KERN_ALERT "Hello world\n");
+  return 0;
+}
+
+static void __exit joy_exit(void)
+{
+  printk(KERN_ALERT "Goodbye world\n");
+}
+
+module_init(joy_init);
+module_exit(joy_exit);
+#endif
+
+MODULE_AUTHOR("Aidan Funk");
+MODULE_DESCRIPTION("GPIO Joystick Driver");
 MODULE_LICENSE("GPL");
 

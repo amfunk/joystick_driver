@@ -9,59 +9,115 @@
 
 #define DRV_NAME "joystick-gpio"
 
-#define UP_GPIO 15
-#define DOWN_GPIO 15
-#define LEFT_GPIO 15
-#define RIGHT_GPIO 15
+#define UP_GPIO 4
+#define DOWN_GPIO 18
+#define LEFT_GPIO 24
+#define RIGHT_GPIO 17
 
-/* Step 1: Define your button/joystick structure */
 struct joy_gpio {
     struct input_dev *input;
-    struct gpio_desc *desc;
-    int irq;
+    struct gpio_desc *up_desc;
+    struct gpio_desc *down_desc;
+    struct gpio_desc *left_desc;
+    struct gpio_desc *right_desc;
+    int up_irq;
+    int down_irq;
+    int left_irq;
+    int right_irq;
 
     /* TODO: add fields for GPIO descriptors, IRQs, state, etc. */
 };
 
-struct joy_gpio *joy;
+static struct joy_gpio *joy;
 
-/* Step 2: IRQ handler for button presses */
 static irqreturn_t joy_irq_handler(int irq, void *data)
 {
-  /* TODO: read GPIO value
-   * TODO: map it to an input event (BTN_DPAD_UP, etc.)
-   * TODO: call input_report_key() and input_sync()
-   */
+  int gpio;
+  unsigned int keycode;
+
+  if (irq == joy->up_irq) {
+    gpio = gpio_get_value(UP_GPIO);
+    keycode = KEY_UP;
+  } else if (irq == joy->down_irq) {
+    gpio = gpio_get_value(DOWN_GPIO);
+    keycode = KEY_DOWN;
+  } else if (irq == joy->left_irq) {
+    gpio = gpio_get_value(LEFT_GPIO);
+    keycode = KEY_LEFT;
+  } else if (irq == joy->right_irq) {
+    gpio = gpio_get_value(RIGHT_GPIO);
+    keycode = KEY_RIGHT;
+  } else {
+    printk(KERN_ALERT "%s: Unknown IRQ line, exiting...\n", DRV_NAME);
+    return IRQ_HANDLED; //TODO lookup irq error return values
+  }
+
+  input_report_key(joy->input, keycode, gpio);
+  printk(KERN_ALERT "%s: Interrupt handled\n", DRV_NAME);
+  printk(KERN_ALERT "%s: GPIO reads at (%d)\n", DRV_NAME, gpio);
+
+  input_sync(joy->input);
+
   return IRQ_HANDLED;
 }
 
-/* Step 3: Probe function — runs when the device is bound */
 static int __init joy_init(void)
 {
 
-  printk(KERN_ALERT "Hello world: %s\n", DRV_NAME);
+  int ret;
 
-  /* TODO: allocate memory (devm_kzalloc) */
+  printk(KERN_ALERT "%s: Hello world\n", DRV_NAME);
+
   joy = kzalloc(sizeof(*joy), GFP_KERNEL);
 
-  /* TODO: request input device (devm_input_allocate_device) */
-  /* TODO: set device name/id */
+  joy->input = input_allocate_device();
+  if (!joy->input) printk(KERN_ALERT "%s: Failed to allocate device\n", DRV_NAME);
+  joy->input->name = "Joystick/Button";
+  set_bit(EV_KEY, joy->input->evbit);
+  set_bit(KEY_UP, joy->input->keybit);
+  set_bit(KEY_DOWN, joy->input->keybit);
+  set_bit(KEY_LEFT, joy->input->keybit);
+  set_bit(KEY_RIGHT, joy->input->keybit);
+  if (input_register_device(joy->input)) printk(KERN_ALERT "%s: Failed to register input device %s\n", DRV_NAME, joy->input->name);
   /* TODO: set input capabilities (input_set_capability) */
-  /* TODO: request GPIOs from DT (devm_gpiod_get) */
-  joy->desc = gpio_to_desc(UP_GPIO);
-  /* TODO: map GPIOs to IRQs (gpiod_to_irq) */
-  joy->irq = gpiod_to_irq(joy->desc);
-  /* TODO: request IRQs (devm_request_threaded_irq) */
-  int ret = request_irq(joy->irq, joy_irq_handler, 0, "joy", joy);
 
-  /* TODO: register the input device (input_register_device) */
+  // IRQ for UP Direction
+  joy->up_desc = gpio_to_desc(UP_GPIO);
+  joy->up_irq = gpiod_to_irq(joy->up_desc);
+  ret = request_irq(joy->up_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_up", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+
+  // IRQ for DOWN Direction
+  joy->down_desc = gpio_to_desc(DOWN_GPIO);
+  joy->down_irq = gpiod_to_irq(joy->down_desc);
+  ret = request_irq(joy->down_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_down", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+
+  // IRQ for LEFT Direction
+  joy->left_desc = gpio_to_desc(LEFT_GPIO);
+  joy->left_irq = gpiod_to_irq(joy->left_desc);
+  ret = request_irq(joy->left_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_left", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+
+  // IRQ for RIGHT Direction
+  joy->right_desc = gpio_to_desc(RIGHT_GPIO);
+  joy->right_irq = gpiod_to_irq(joy->right_desc);
+  ret = request_irq(joy->right_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_right", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+
+  //if(gpiod_set_debounce(joy->up_desc, 1000000)) printk(KERN_ALERT "%s: Failed to set debounce\n", DRV_NAME);
+
 
   return 0;
 }
 
 static void __exit joy_exit(void)
 {
-  printk(KERN_ALERT "Goodbye world\n");
+  printk(KERN_ALERT "%s: Goodbye world\n", DRV_NAME);
+
+  free_irq(joy->up_irq, joy);
+  free_irq(joy->down_irq, joy);
+  free_irq(joy->left_irq, joy);
+  free_irq(joy->right_irq, joy);
+
+  input_unregister_device(joy->input);
+
   kfree(joy);
 }
 

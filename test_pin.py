@@ -1,14 +1,15 @@
 import RPi.GPIO as GPIO
 import time
 
+PIN = 27
+
 GPIO.setmode(GPIO.BCM)
 
-# Set pin 17 as input with a pull-down resistor
-GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 try:
     while True:
-        if GPIO.input(17) == GPIO.HIGH:
+        if GPIO.input(PIN) == GPIO.HIGH:
             print("Connection complete (3.3V detected)")
         else:
             print("Connection open (0V / no 3.3V)")

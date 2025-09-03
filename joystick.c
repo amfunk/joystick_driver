@@ -13,96 +13,111 @@
 #define DOWN_GPIO 18
 #define LEFT_GPIO 24
 #define RIGHT_GPIO 17
+#define ABUT_GPIO 26
+#define BBUT_GPIO 27
+
+#define DEBOUNCE_MS 20
 
 struct joy_gpio {
-    struct input_dev *input;
-    struct gpio_desc *up_desc;
-    struct gpio_desc *down_desc;
-    struct gpio_desc *left_desc;
-    struct gpio_desc *right_desc;
-    int up_irq;
-    int down_irq;
-    int left_irq;
-    int right_irq;
+  struct input_dev *input;
+  struct button_gpio *up;
+  struct button_gpio *down;
+  struct button_gpio *left;
+  struct button_gpio *right;
+  struct button_gpio *abut;
+  struct button_gpio *bbut;
+};
 
-    /* TODO: add fields for GPIO descriptors, IRQs, state, etc. */
+struct button_gpio {
+  struct gpio_desc *desc;
+  int irq;
+  unsigned int keycode;
+  struct delayed_work dwork;
 };
 
 static struct joy_gpio *joy;
 
 static irqreturn_t joy_irq_handler(int irq, void *data)
 {
-  int gpio;
-  unsigned int keycode;
+  struct button_gpio *button = data;
+  int gpio = gpiod_get_value(button->desc);
+  
+  //printk(KERN_ALERT "%s: Interrupt handled\n", DRV_NAME);
 
-  if (irq == joy->up_irq) {
-    gpio = gpio_get_value(UP_GPIO);
-    keycode = KEY_UP;
-  } else if (irq == joy->down_irq) {
-    gpio = gpio_get_value(DOWN_GPIO);
-    keycode = KEY_DOWN;
-  } else if (irq == joy->left_irq) {
-    gpio = gpio_get_value(LEFT_GPIO);
-    keycode = KEY_LEFT;
-  } else if (irq == joy->right_irq) {
-    gpio = gpio_get_value(RIGHT_GPIO);
-    keycode = KEY_RIGHT;
-  } else {
-    printk(KERN_ALERT "%s: Unknown IRQ line, exiting...\n", DRV_NAME);
-    return IRQ_HANDLED; //TODO lookup irq error return values
-  }
-
-  input_report_key(joy->input, keycode, gpio);
-  printk(KERN_ALERT "%s: Interrupt handled\n", DRV_NAME);
-  printk(KERN_ALERT "%s: GPIO reads at (%d)\n", DRV_NAME, gpio);
+  input_report_key(joy->input, button->keycode, gpio);
 
   input_sync(joy->input);
 
   return IRQ_HANDLED;
 }
 
-static int __init joy_init(void)
+static void joy_work_func(struct work_struct *work)
 {
 
+}
+
+static int setup_irq_line(struct button_gpio *button, int GPIO, char *name, unsigned int keycode)
+{
+  int ret;
+
+  button->keycode = keycode;
+
+  button->desc = gpio_to_desc(GPIO);
+  button->irq = gpiod_to_irq(button->desc);
+
+  ret = request_irq(button->irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, name, button);
+
+  return ret;
+}
+
+static int __init joy_init(void)
+{
   int ret;
 
   printk(KERN_ALERT "%s: Hello world\n", DRV_NAME);
 
   joy = kzalloc(sizeof(*joy), GFP_KERNEL);
+  joy->up = kzalloc(sizeof(*joy->up), GFP_KERNEL);
+  joy->down = kzalloc(sizeof(*joy->down), GFP_KERNEL);
+  joy->left = kzalloc(sizeof(*joy->left), GFP_KERNEL);
+  joy->right = kzalloc(sizeof(*joy->right), GFP_KERNEL);
+  joy->abut = kzalloc(sizeof(*joy->abut), GFP_KERNEL);
+  joy->bbut = kzalloc(sizeof(*joy->bbut), GFP_KERNEL);
 
   joy->input = input_allocate_device();
-  if (!joy->input) printk(KERN_ALERT "%s: Failed to allocate device\n", DRV_NAME);
-  joy->input->name = "Joystick/Button";
+  if (!joy->input) {
+    printk(KERN_ALERT "%s: Failed to allocate device\n", DRV_NAME);
+  }
+
+  joy->input->name = "Joystick/Buttons";
   set_bit(EV_KEY, joy->input->evbit);
   set_bit(KEY_UP, joy->input->keybit);
   set_bit(KEY_DOWN, joy->input->keybit);
   set_bit(KEY_LEFT, joy->input->keybit);
   set_bit(KEY_RIGHT, joy->input->keybit);
+  set_bit(KEY_A, joy->input->keybit);
+  set_bit(KEY_B, joy->input->keybit);
+
   if (input_register_device(joy->input)) printk(KERN_ALERT "%s: Failed to register input device %s\n", DRV_NAME, joy->input->name);
   /* TODO: set input capabilities (input_set_capability) */
 
   // IRQ for UP Direction
-  joy->up_desc = gpio_to_desc(UP_GPIO);
-  joy->up_irq = gpiod_to_irq(joy->up_desc);
-  ret = request_irq(joy->up_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_up", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+  ret = setup_irq_line(joy->up, UP_GPIO, "joystick_up", KEY_UP);
 
   // IRQ for DOWN Direction
-  joy->down_desc = gpio_to_desc(DOWN_GPIO);
-  joy->down_irq = gpiod_to_irq(joy->down_desc);
-  ret = request_irq(joy->down_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_down", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+  ret = setup_irq_line(joy->down, DOWN_GPIO, "joystick_down", KEY_DOWN);
 
   // IRQ for LEFT Direction
-  joy->left_desc = gpio_to_desc(LEFT_GPIO);
-  joy->left_irq = gpiod_to_irq(joy->left_desc);
-  ret = request_irq(joy->left_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_left", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+  ret = setup_irq_line(joy->left, LEFT_GPIO, "joystick_left", KEY_LEFT);
 
   // IRQ for RIGHT Direction
-  joy->right_desc = gpio_to_desc(RIGHT_GPIO);
-  joy->right_irq = gpiod_to_irq(joy->right_desc);
-  ret = request_irq(joy->right_irq, joy_irq_handler, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "joystick_right", joy); //TODO: I might wanna make this TRIGGER_HIGH or TRIGGER_RISING, see how it interfaces with retropi
+  ret = setup_irq_line(joy->right, RIGHT_GPIO, "joystick_right", KEY_RIGHT);
 
-  //if(gpiod_set_debounce(joy->up_desc, 1000000)) printk(KERN_ALERT "%s: Failed to set debounce\n", DRV_NAME);
+  // IRQ for A Button
+  ret = setup_irq_line(joy->abut, ABUT_GPIO, "button_a", KEY_A);
 
+  // IRQ for B Button
+  ret = setup_irq_line(joy->bbut, BBUT_GPIO, "button_b", KEY_B);
 
   return 0;
 }
@@ -111,13 +126,21 @@ static void __exit joy_exit(void)
 {
   printk(KERN_ALERT "%s: Goodbye world\n", DRV_NAME);
 
-  free_irq(joy->up_irq, joy);
-  free_irq(joy->down_irq, joy);
-  free_irq(joy->left_irq, joy);
-  free_irq(joy->right_irq, joy);
+  free_irq(joy->up->irq, joy);
+  free_irq(joy->down->irq, joy);
+  free_irq(joy->left->irq, joy);
+  free_irq(joy->right->irq, joy);
+  free_irq(joy->abut->irq, joy);
+  free_irq(joy->bbut->irq, joy);
 
   input_unregister_device(joy->input);
 
+  kfree(joy->up);
+  kfree(joy->down);
+  kfree(joy->left);
+  kfree(joy->right);
+  kfree(joy->abut);
+  kfree(joy->bbut);
   kfree(joy);
 }
 
